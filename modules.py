@@ -6,6 +6,20 @@ import torch.nn.functional as F
 from utils import *
 from cplxmodule.nn import CplxConv2d, CplxConvTranspose2d, CplxBatchNorm2d, CplxLinear, CplxConv1d, CplxBatchNorm1d
 from complexPyTorch.complexFunctions import complex_relu
+import cplxmodule.nn.modules.conv as _cplx_conv
+
+_cplx_orig_output_padding = _cplx_conv.CplxConvTransposeNd._output_padding
+
+def _cplx_patched_output_padding(self, input, output_size, stride, padding,
+                                  kernel_size, num_spatial_dims=None, dilation=None):
+    if num_spatial_dims is None:
+        num_spatial_dims = len(kernel_size)
+    if dilation is None:
+        dilation = getattr(self, 'dilation', None)
+    return _cplx_orig_output_padding(self, input, output_size, stride,
+                                      padding, kernel_size, num_spatial_dims, dilation)
+
+_cplx_conv.CplxConvTransposeNd._output_padding = _cplx_patched_output_padding
 from torch.nn.modules.module import Module
 from torch.nn.modules.container import ModuleList
 from torch.nn.init import xavier_uniform_
@@ -249,7 +263,7 @@ def complex_mul(x, y):
 
 
 def complex_sigmoid(input):
-    return F.sigmoid(input.real).type(torch.complex64) + 1j * F.sigmoid(input.imag).type(torch.complex64)
+    return torch.sigmoid(input.real).type(torch.complex64) + 1j * torch.sigmoid(input.imag).type(torch.complex64)
 
 
 class complex_softplus(nn.Module):

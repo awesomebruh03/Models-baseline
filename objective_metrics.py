@@ -229,8 +229,9 @@ class NegSTOILoss(nn.Module):
         hop = int(win_len / overlap)
         # Last frame not taken because NFFT size is larger, torch bug IMO.
         x_padded = torch.nn.functional.pad(x, pad=[0, hop])
-        return torch.stft(x_padded, fft_size, hop_length=hop, window=win,
-                          center=False, win_length=win_len)
+        spec = torch.stft(x_padded, fft_size, hop_length=hop, window=win,
+                          center=False, win_length=win_len, return_complex=True)
+        return torch.view_as_real(spec)
 
     @staticmethod
     def rowcol_norm(x, mask=None):

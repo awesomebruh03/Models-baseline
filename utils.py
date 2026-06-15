@@ -5,7 +5,7 @@ import numpy as np
 import functools
 import os, numbers, math, signal
 from typing import Union, List, Sequence
-from distutils.version import LooseVersion
+from packaging.version import parse as Version
 import warnings
 import torch as th
 
@@ -886,12 +886,12 @@ def signal_frame(signal: torch.Tensor,
 
 
 def trace(a: ComplexTensor) -> ComplexTensor:
-    if LooseVersion(torch.__version__) >= LooseVersion('1.3'):
+    if Version(torch.__version__) >= Version('1.3'):
         datatype = torch.bool
     else:
         datatype = torch.uint8
     E = torch.eye(a.real.size(-1), dtype=datatype).expand(*a.size())
-    if LooseVersion(torch.__version__) >= LooseVersion('1.1'):
+    if Version(torch.__version__) >= Version('1.1'):
         E = E.type(torch.bool)
     return a[E].view(*a.size()[:-1]).sum(-1)
 
@@ -982,6 +982,6 @@ def solve(b: ComplexTensor, a: ComplexTensor) -> ComplexTensor:
     """Solve ax = b"""
     a = complex_matrix2real_matrix(a)
     b = complex_vector2real_vector(b)
-    x, LU = torch.solve(b, a)
+    x = torch.linalg.solve(a, b)
 
-    return real_vector2complex_vector(x), real_matrix2complex_matrix(LU)
+    return real_vector2complex_vector(x), None

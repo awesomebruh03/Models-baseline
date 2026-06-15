@@ -2,8 +2,9 @@ import os, argparse, shutil
 import torch, math
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint
+import lightning.pytorch as pl
+from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.strategies import DDPStrategy
 from dataloader import loaddataset
 from auraloss.time import SISDRLoss
 from auraloss.freq import STFTLoss
@@ -18,6 +19,7 @@ class DeepLearningModel(pl.LightningModule):
         self.model = net
         self.modelname = self.model.name
         self.batch_size = batch_size
+        self.val_outputs = []
         self.si_sdr = SISDRLoss()
         self.freqloss = STFTLoss(fft_size=320, hop_size=80, win_length=320, sample_rate=16000, scale_invariance=False,
                                  w_sc=0.0)
@@ -27,6 +29,10 @@ class DeepLearningModel(pl.LightningModule):
         return self.model(x)
 
     def loss_function(self, cln_audio, enh_audio):
+        if cln_audio.dim() == 2:
+            cln_audio = cln_audio.unsqueeze(1)
+        if enh_audio.dim() == 2:
+            enh_audio = enh_audio.unsqueeze(1)
         loss = self.si_sdr(cln_audio, enh_audio) + 25 * self.freqloss(cln_audio, enh_audio)
         return loss
 
@@ -40,16 +46,17 @@ class DeepLearningModel(pl.LightningModule):
         enh_audio = self(batch['noisy'])
         loss = self.loss_function(batch['clean'], enh_audio)
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        return {'val_loss': loss}
+        self.val_outputs.append(loss)
+        return loss
 
-    def validation_epoch_end(self, outputs):
-        avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-        tensorboard_logs = {'val_loss': avg_loss}
-        return {'val_loss': avg_loss, 'log': tensorboard_logs}
+    def on_validation_epoch_end(self):
+        avg_loss = torch.stack(self.val_outputs).mean()
+        self.log('val_loss', avg_loss)
+        self.val_outputs.clear()
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=3e-4, weight_decay=1e-5, betas=(0.5, 0.999))
-        scheduler = {'scheduler': ReduceLROnPlateau(optimizer, mode='min', patience=3, verbose=True),
+        scheduler = {'scheduler': ReduceLROnPlateau(optimizer, mode='min', patience=3),
                      'interval': 'epoch', 'frequency': 1, 'reduce_on_plateau': True, 'monitor': 'val_loss'}
         return [optimizer], [scheduler]
 
@@ -87,13 +94,13 @@ if __name__ == '__main__':
     callbacks = ModelCheckpoint(monitor='val_loss', dirpath=os.getcwd() + '/Saved_Models/' + model.modelname,
                                 filename=model.modelname + '-DADX-IEEE-' + args.loss + '-{epoch:02d}-{val_loss:.2f}',
                                 save_top_k=1, mode='min')
-    TrainData = loaddataset(os.getcwd() + '/Database/Training_Samples/Train')
-    trainloader = DataLoader(TrainData, batch_size=args.b, shuffle=True, num_workers=12, pin_memory=True)
-    DevData = loaddataset(os.getcwd() + '/Database/Training_Samples/Dev')
-    devloader = DataLoader(DevData, batch_size=args.b, shuffle=False, num_workers=12, pin_memory=True)
+    TrainData = loaddataset('/kaggle/input/datasets/sajidullah03/audio-speech-enhancement-dataset-16k-3s/clean_bank.pt', '/kaggle/input/datasets/sajidullah03/audio-speech-enhancement-dataset-16k-3s/noise_bank.pt', train=True)
+    trainloader = DataLoader(TrainData, batch_size=args.b, shuffle=True, num_workers=4, pin_memory=True)
+    DevData = loaddataset('/kaggle/input/datasets/sajidullah03/audio-speech-enhancement-dataset-16k-3s/clean_bank.pt', '/kaggle/input/datasets/sajidullah03/audio-speech-enhancement-dataset-16k-3s/noise_bank.pt', train=False)
+    devloader = DataLoader(DevData, batch_size=args.b, shuffle=False, num_workers=4, pin_memory=True)
     print(gpuIDs)
     print(torch.cuda.is_available())
-    trainer = pl.Trainer(max_epochs=args.e, gpus=gpuIDs, strategy='ddp', callbacks=callbacks, gradient_clip_val=10,
+    trainer = pl.Trainer(max_epochs=args.e, accelerator="gpu", devices=gpuIDs, strategy=DDPStrategy(find_unused_parameters=True), callbacks=callbacks, gradient_clip_val=10,
                          accumulate_grad_batches=8)  # GPU only
     # trainer = pl.Trainer(max_epochs=args.e, accelerator="cpu", callbacks=callbacks, gradient_clip_val=10, accumulate_grad_batches=8) # CPU only
     trainer.fit(model, train_dataloaders=trainloader, val_dataloaders=devloader)

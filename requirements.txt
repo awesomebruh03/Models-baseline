@@ -1,0 +1,15 @@
+torch>=2.1.0
+torchaudio>=2.1.0
+numpy>=1.24.0,<2.0
+soundfile>=0.12.0
+librosa>=0.10.0
+tqdm>=4.60.0
+lightning>=2.1.0
+auraloss>=0.3.0
+cplxmodule>=2022.6
+complexPyTorch>=0.4.0
+pystoi>=0.3.0
+pesq>=0.0.4
+matplotlib>=3.5.0
+scipy>=1.10.0
+packaging>=21.0
