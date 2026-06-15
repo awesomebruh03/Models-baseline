@@ -205,7 +205,19 @@ if __name__ == '__main__':
     fixed_sd = OrderedDict()
     for k, v in state_dict.items():
         fixed_sd[k.replace('model.', '', 1) if k.startswith('model.') else k] = v
-    model.load_state_dict(fixed_sd, strict=False)
+
+    # Filter out keys whose tensor shapes don't match the current model.
+    # DPAtBlock.Inter_LN / Intra_LN are rebuilt dynamically on every forward()
+    # pass, so their __init__ weights are never actually used – it's safe to
+    # skip them when the checkpoint was trained with a different sequence length.
+    model_state = model.state_dict()
+    skipped = [k for k, v in fixed_sd.items()
+               if k in model_state and v.shape != model_state[k].shape]
+    if skipped:
+        print(f'Skipping {len(skipped)} mismatched param(s) (shape mismatch): {skipped}')
+    filtered_sd = {k: v for k, v in fixed_sd.items()
+                   if k not in skipped}
+    model.load_state_dict(filtered_sd, strict=False)
     model.eval()
     print('Model loaded successfully')
 
